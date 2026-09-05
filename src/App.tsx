@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useAccounts } from "./hooks/useAccounts";
 import { useForceCloseCodexProcesses } from "./hooks/useForceCloseCodexProcesses";
 import { AccountCard, AddAccountModal, UpdateChecker } from "./components";
+import { StartupSettings } from "./components/StartupSettings";
 import type { AccountWithUsage, CodexProcessInfo, DockDisplayMode, UsageInfo } from "./types";
 import {
   exportFullBackupFile,
@@ -1515,6 +1516,7 @@ function App() {
                         {themeMode === "dark" ? "☾ Dark" : "☀ Light"}
                       </span>
                     </button>
+                    <StartupSettings />
                   </div>
                 )}
                 {isTimedWarmupOpen && (

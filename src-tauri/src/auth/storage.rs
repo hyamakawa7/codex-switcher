@@ -1,7 +1,7 @@
 //! Account storage module - manages reading and writing accounts.json
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -97,14 +97,20 @@ pub fn load_accounts() -> Result<AccountsStore> {
 }
 
 pub fn load_app_settings() -> Result<AppSettings> {
-    let path = get_settings_file()?;
+    load_app_settings_from(&get_settings_file()?)
+}
 
-    if !path.exists() {
-        return Ok(AppSettings::default());
-    }
-
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read settings file: {}", path.display()))?;
+fn load_app_settings_from(path: &Path) -> Result<AppSettings> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AppSettings::default());
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Failed to read settings file: {}", path.display()))
+        }
+    };
 
     let settings: AppSettings = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse settings file: {}", path.display()))?;
@@ -113,25 +119,36 @@ pub fn load_app_settings() -> Result<AppSettings> {
 }
 
 pub fn save_app_settings(settings: &AppSettings) -> Result<()> {
-    let path = get_settings_file()?;
+    save_app_settings_to(&get_settings_file()?, settings)
+}
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
-    }
-
+fn save_app_settings_to(path: &Path, settings: &AppSettings) -> Result<()> {
     let content = serde_json::to_string_pretty(settings).context("Failed to serialize settings")?;
-    fs::write(&path, content)
-        .with_context(|| format!("Failed to write settings file: {}", path.display()))?;
-
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(&path, perms)?;
+        crate::startup::linux::atomic_write(path, content.as_bytes())
+            .with_context(|| format!("Failed to write settings file: {}", path.display()))
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
+        }
 
-    Ok(())
+        fs::write(&path, content)
+            .with_context(|| format!("Failed to write settings file: {}", path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o600);
+            fs::set_permissions(&path, perms)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Save the accounts store to disk
@@ -364,9 +381,85 @@ pub fn set_masked_account_ids(ids: Vec<String>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::sync_active_account_tokens;
+    use super::{load_app_settings_from, save_app_settings_to, sync_active_account_tokens};
+    use crate::types::AppSettings;
     use crate::types::{AccountsStore, AuthData, AuthDotJson, StoredAccount, TokenData};
     use base64::Engine;
+    use std::{fs, path::PathBuf};
+
+    struct SettingsDirectory(PathBuf);
+
+    impl SettingsDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("codex-switcher-settings-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for SettingsDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn missing_and_old_settings_default_to_visible_startup() {
+        let directory = SettingsDirectory::new();
+        let path = directory.0.join("settings.json");
+        assert!(!load_app_settings_from(&path).unwrap().start_hidden);
+        fs::write(&path, r#"{"close_behavior_prompt_enabled":false}"#).unwrap();
+        let settings = load_app_settings_from(&path).unwrap();
+        assert!(!settings.start_hidden);
+        assert!(!settings.close_behavior_prompt_enabled);
+    }
+
+    #[test]
+    fn malformed_and_unreadable_settings_are_errors() {
+        let directory = SettingsDirectory::new();
+        let path = directory.0.join("settings.json");
+        fs::write(&path, "not json").unwrap();
+        assert!(load_app_settings_from(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("parse"));
+        assert!(load_app_settings_from(&directory.0)
+            .unwrap_err()
+            .to_string()
+            .contains("read"));
+    }
+
+    #[test]
+    fn settings_roundtrip_and_replace_existing_file() {
+        let directory = SettingsDirectory::new();
+        let path = directory.0.join("nested/settings.json");
+        for start_hidden in [true, false, true] {
+            let settings = AppSettings {
+                start_hidden,
+                close_behavior_prompt_enabled: false,
+                ..Default::default()
+            };
+            save_app_settings_to(&path, &settings).unwrap();
+            let loaded = load_app_settings_from(&path).unwrap();
+            assert_eq!(loaded.start_hidden, start_hidden);
+            assert!(!loaded.close_behavior_prompt_enabled);
+        }
+    }
+
+    #[test]
+    fn failed_settings_write_preserves_destination_and_cleans_temporary_file() {
+        let directory = SettingsDirectory::new();
+        let path = directory.0.join("settings.json");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("existing"), "preserve me").unwrap();
+        assert!(save_app_settings_to(&path, &AppSettings::default()).is_err());
+        assert_eq!(
+            fs::read_to_string(path.join("existing")).unwrap(),
+            "preserve me"
+        );
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 1);
+    }
 
     fn account(name: &str, account_id: &str, suffix: &str) -> StoredAccount {
         StoredAccount::new_chatgpt(

@@ -5,6 +5,7 @@ pub mod api;
 pub mod app_menu;
 pub mod auth;
 pub mod commands;
+pub mod startup;
 #[cfg(desktop)]
 pub mod tray;
 pub mod types;
@@ -24,7 +25,33 @@ use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    {
+        let hidden = auth::load_app_settings()
+            .map(|s| s.start_hidden)
+            .unwrap_or_else(|error| {
+                eprintln!("Failed to load startup settings: {error}");
+                false
+            });
+        if let Some(main) = context
+            .config_mut()
+            .app
+            .windows
+            .iter_mut()
+            .find(|w| w.label == "main")
+        {
+            main.visible = !hidden;
+        }
+    }
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "linux")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if startup::linux::manual_second_launch(&args) {
+            commands::restore_main_window(app);
+        }
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -34,7 +61,10 @@ pub fn run() {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app_menu::setup(app.handle())?;
-                tray::setup(app.handle())?;
+                if let Err(error) = tray::setup(app.handle()) {
+                    eprintln!("Failed to create tray: {error}");
+                    commands::restore_main_window(app.handle());
+                }
             }
             Ok(())
         })
@@ -61,6 +91,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_codex_app,
+            startup::get_startup_settings,
+            startup::set_launch_at_login,
+            startup::set_start_hidden,
             // Account management
             list_accounts,
             get_active_account_info,
@@ -99,7 +132,7 @@ pub fn run() {
             complete_close_behavior,
             ack_close_behavior_prompt,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
