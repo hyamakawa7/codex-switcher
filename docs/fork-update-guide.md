@@ -11,14 +11,14 @@
 | 作業ディレクトリ | `/home/mt/Documents/playground/codex-switcher` |
 | 自分のfork（origin） | `https://github.com/hyamakawa7/codex-switcher.git` |
 | 公式リポジトリ | `https://github.com/Lampese/codex-switcher` |
-| 公式用リモート（upstream） | 未登録。後述の手順で追加する |
-| 今回のブランチ | `feature/linux-autostart-tray` |
-| 今回の変更 | 未コミット。GitHubへの保存はまだ完了していない |
+| 公式用リモート（upstream） | `https://github.com/Lampese/codex-switcher.git`（登録済み） |
+| Linux機能の保存先 | forkの `main`（[PR #1](https://github.com/hyamakawa7/codex-switcher/pull/1) で取り込み済み） |
+| ローカル変更の保存 | コミット・push済み |
 | インストール版 | `0.2.12`を元にしたローカルビルド |
 | 自動起動の設定 | Launch at login / Start hidden in tray ともにON |
 | 再ログイン | ユーザーによる動作確認済み |
 
-この文書の作成ではリモート追加、commit、push、merge、更新先の変更は実行していない。
+初回の保存・mainへの取り込み・公式リモート登録は完了している。以後は下記の更新手順から進める。アプリ内の更新先は公式のまま。
 
 ## アプリ内のUpdateボタンについて
 
@@ -29,53 +29,6 @@ forkをcloneしても、この更新先は自動では自分のforkへ変わら�
 ビルド時の `createUpdaterArtifacts=false` は署名付き更新成果物の生成を止める指定であり、アプリ内の更新確認を無効化する設定ではない。今回のビルドには `__TAURI_BUNDLE_TYPE` に関する警告もあったため、アプリ内更新が必ず成功する／必ず失敗するとは扱わない。
 
 自分のforkからアプリ内更新を配信したい場合は、別の機能として更新URL、署名鍵と公開鍵、CIの秘密情報、配布成果物、バージョン運用を整備する。URLの置換だけでは完了しない。
-
-## 初回だけ：今回の変更をforkへ保存する
-
-現在の未コミット変更を保存してから公式の変更を取り込む。以下は今後実行する手順。
-
-```bash
-cd /home/mt/Documents/playground/codex-switcher
-git status --short --branch
-git diff --stat
-git diff --check
-```
-
-未追跡の `docs/`、対応表、新規Rust・Reactファイルも内容を確認する。機能の関連ファイルを明示してステージする。
-
-```bash
-git add README.md docs/ referent-table-linux-autostart.md referent-table-fork-updates.md src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/auth/storage.rs src-tauri/src/commands/window.rs src-tauri/src/lib.rs src-tauri/src/tray.rs src-tauri/src/types.rs src-tauri/src/startup.rs src/App.tsx src/components/StartupSettings.tsx
-git diff --cached --stat
-git diff --cached --check
-git commit -m "feat: add Linux login and hidden startup preferences"
-git push -u origin feature/linux-autostart-tray
-```
-
-自分のfork内で、このブランチから `main` へPRを作り、レビューして取り込む。PRの取り込み先が **hyamakawa7/codex-switcher の main** であることを確認する。公式リポジトリへ提案するPRは別の操作。
-
-取り込み後、ローカルのmainを更新する。
-
-```bash
-git switch main
-git pull --ff-only origin main
-```
-
-この後の手順は、今回の機能がforkのmainへ保存済みであることを前提とする。
-
-## 初回だけ：公式用のリモートを登録する
-
-```bash
-git remote -v
-```
-
-`upstream` がない場合にだけ実行する。
-
-```bash
-git remote add upstream https://github.com/Lampese/codex-switcher.git
-git remote -v
-```
-
-既にある場合はURLが公式を指しているか確認する。`origin` は自分のforkのまま維持する。この構成は [GitHubのfork用リモート設定手順](https://docs.github.com/en/pull-requests/how-tos/work-with-forks/configuring-a-remote-repository-for-a-fork) に対応する。
 
 ## 更新のたびに：公式のリリースを作業ブランチへ取り込む
 
