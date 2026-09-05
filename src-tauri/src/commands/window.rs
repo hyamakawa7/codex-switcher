@@ -55,6 +55,8 @@ pub fn hide_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
     #[cfg(target_os = "macos")]
     let _ = app.hide();
+    #[cfg(target_os = "linux")]
+    crate::tray::refresh(app);
 }
 
 #[cfg(target_os = "macos")]
@@ -91,6 +93,8 @@ pub fn restore_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+    #[cfg(target_os = "linux")]
+    crate::tray::refresh(app);
 }
 
 /// Quit the whole application from the tray.

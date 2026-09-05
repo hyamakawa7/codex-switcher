@@ -48,6 +48,59 @@ Choose the file for your platform:
 > open "/Applications/Codex Switcher.app"
 > ```
 
+### Linux: launch at login and start in the tray
+
+Open the top-right menu in the desktop app:
+
+- **Launch at login** registers the installed executable with `--autostart` in `$XDG_CONFIG_HOME/autostart/codex-switcher.desktop` (normally `~/.config/autostart/codex-switcher.desktop`). Turn it off to write a disabled entry (`Hidden=true`), also overriding a system-wide entry with the same name.
+- **Start hidden in tray** saves `start_hidden` in `~/.codex-switcher/settings.json`. It takes effect on the next application start, for both manual and login launches. The window is created hidden; if tray creation fails, the main window opens.
+
+Both settings default to off and are independent:
+
+| Launch at login | Start hidden in tray | At login | Manual start when not running |
+|---|---|---|---|
+| Off | Off | Does not start | Opens the window |
+| Off | On | Does not start | Starts in the tray |
+| On | Off | Opens the window | Opens the window |
+| On | On | Starts in the tray | Starts in the tray |
+
+Use **Open Codex Switcher** or **Quit** in the tray menu. Launching the app again manually opens the existing window without leaving a second process; a second launch with `--autostart` preserves the existing window state. Linux keeps the tray icon visible while the main window is hidden, including when the saved tray display mode is Hidden. These preferences are unavailable in the browser dashboard and on other platforms.
+
+Registration follows the [XDG autostart specification](https://specifications.freedesktop.org/autostart/latest/); duplicate launches use the [Tauri Single Instance plugin](https://v2.tauri.app/plugin/single-instance/).
+
+#### Build a local Debian package
+
+Disable updater signing artifacts for this build only:
+
+```bash
+pnpm tauri build --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+Before replacing an existing installation, quit the app and back up `/usr/bin/codex-switcher`, the autostart entry, `~/.codex-switcher/settings.json` (or record that it did not exist), and any external startup/hide helpers. Install the generated package with `sudo dpkg -i "src-tauri/target/release/bundle/deb/Codex Switcher_0.2.12_amd64.deb"`. Launch the installed executable and enable both preferences to retain an existing login-to-tray workflow. Enabling Launch at login replaces the external helper command with a direct executable command. Keep the old helpers in the backup.
+
+#### Restore the previous local installation
+
+Quit Codex Switcher. Set `backup_dir` to the directory holding the previous binary as `codex-switcher`, autostart entry as `autostart.desktop`, and settings as `settings.json` (or a `settings-was-absent` marker). Then run:
+
+```bash
+sudo install -o root -g root -m 755 "$backup_dir/codex-switcher" /usr/bin/codex-switcher
+cp -a "$backup_dir/autostart.desktop" ~/.config/autostart/codex-switcher.desktop
+if [ -f "$backup_dir/settings-was-absent" ]; then
+  rm -f ~/.codex-switcher/settings.json
+else
+  cp -a "$backup_dir/settings.json" ~/.codex-switcher/settings.json
+fi
+mkdir -p ~/.local/libexec
+cp -a "$backup_dir"/codex-switcher-autostart "$backup_dir"/codex-switcher-hide "$backup_dir"/codex-switcher-hide.c ~/.local/libexec/
+~/.local/libexec/codex-switcher-autostart
+```
+
+This restores the backed-up binary and this PC's former helper-based startup. To restore package metadata as well after a version change, reinstall the previous Debian package instead of copying the binary. Verify automatic startup on the next actual login; directly launching the autostart entry does not test the desktop's login sequence.
+
+### Maintaining a personal Linux fork
+
+See [fork版の更新手順（日本語）](docs/fork-update-guide.md) for preserving the local startup preferences when incorporating upstream releases, rebuilding, installing, and rolling back.
+
 ### Auto Updates
 
 Codex Switcher checks the latest GitHub release on startup. When a newer signed
